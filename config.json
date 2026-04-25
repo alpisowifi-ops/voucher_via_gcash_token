@@ -1,0 +1,10 @@
+{
+  "qr": "qr.jpg",
+  "rates": [
+    {"amount":10,"label":"4 Hours"},
+    {"amount":15,"label":"6 Hours"},
+    {"amount":20,"label":"10 Hours"},
+    {"amount":30,"label":"1 Day"}
+  ],
+  "earnings": 0
+}
