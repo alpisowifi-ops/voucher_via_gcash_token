@@ -3,44 +3,46 @@
 clear
 echo "🔥 INSTALLING PISO WIFI TOKEN SYSTEM..."
 
-pkg update -y
-pkg upgrade -y
+set -e  # stop pag may error
 
-pkg install php git tmux termux-api termux-services iproute2 -y
+pkg update -y && pkg upgrade -y
+pkg install php git tmux iproute2 -y
 
-echo "📂 Setting storage..."
-termux-setup-storage
-
-sleep 2
-
-# 🔥 REMOVE OLD SYSTEM
 echo "🧹 Cleaning old install..."
 rm -rf ~/htdocs
-rm -rf ~/voucher_via_gcash
-rm -rf ~/voucher_via_gcash_token
 
-# 📥 CLONE NEW TOKEN SYSTEM
-echo "📥 Downloading system..."
-git clone https://github.com/alpisowifi-ops/voucher_via_gcash_token ~/htdocs
+echo "📥 Cloning system..."
+git clone https://github.com/alpisowifi-ops/voucher_via_gcash_token ~/htdocs || {
+    echo "❌ CLONE FAILED! Check internet."
+    exit 1
+}
 
 cd ~/htdocs
 
-# 🔐 GENERATE RANDOM API NAME + KEY
+# 🔍 CHECK FILE EXISTS
+if [ ! -f "d6s0or.php" ]; then
+    echo "❌ ERROR: d6s0or.php not found!"
+    ls
+    exit 1
+fi
+
+echo "✅ Files OK"
+
+# 🔐 GENERATE KEYS
 API_NAME=$(tr -dc a-z0-9 </dev/urandom | head -c 6)
 SECRET_KEY=$(tr -dc a-z0-9 </dev/urandom | head -c 10)
 
-# 🔁 RENAME API FILE
+# 🔁 RENAME API
 mv d6s0or.php $API_NAME.php
 
-# 🔑 REPLACE SECRET KEY
+# 🔑 REPLACE KEY
 sed -i "s/u36qbe29fl/$SECRET_KEY/g" $API_NAME.php
 
-# 🌐 GET IP (SAFE FIX)
-IP=$(ip route get 1 | awk '{print $7;exit}')
+# 🌐 GET IP (safe fallback)
+IP=$(ip route get 1 2>/dev/null | awk '{print $7;exit}')
+[ -z "$IP" ] && IP="127.0.0.1"
 
-# ⚙️ AUTO START SERVER
-echo "🚀 Setting auto-start..."
-
+# 🚀 START SERVER
 cat > ~/start_wifi.sh <<EOF
 cd ~/htdocs
 php -S 0.0.0.0:8080
@@ -48,21 +50,20 @@ EOF
 
 chmod +x ~/start_wifi.sh
 
-# RUN SERVER IN TMUX
+tmux kill-session -t wifi 2>/dev/null || true
 tmux new-session -d -s wifi "~/start_wifi.sh"
 
 echo ""
 echo "✅ INSTALL COMPLETE!"
 echo ""
-echo "🌐 Open this in browser:"
+echo "🌐 Open:"
 echo "👉 http://$IP:8080"
 echo ""
-echo "🔐 Admin Panel:"
+echo "🔐 Admin:"
 echo "👉 http://$IP:8080/admin.php"
 echo "👉 Password: admin123"
 echo ""
-echo "⚙️ MacroDroid URL:"
+echo "⚙️ API:"
 echo "👉 http://$IP:8080/$API_NAME.php?amount=10&key=$SECRET_KEY"
 echo ""
-echo "⚡ Server running in background (tmux)"
-echo "⚡ Auto start enabled"
+echo "⚡ Running in background (tmux)"
