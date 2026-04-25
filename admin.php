@@ -1,6 +1,10 @@
 <?php
 session_start();
 
+header("Cache-Control: no-cache, no-store, must-revalidate");
+header("Pragma: no-cache");
+header("Expires: 0");
+
 $pass_file = "admin_pass.txt";
 $config_file = "config.json";
 $voucher_file = "vouchers.json";
@@ -24,7 +28,6 @@ $config = load_json($config_file);
 $data   = load_json($voucher_file);
 $logs   = load_json($logs_file);
 
-// FIX CONFIG
 if(!isset($config['qr'])) $config['qr'] = "qr.jpg";
 if(!isset($config['rates'])) $config['rates'] = [];
 if(!isset($config['earnings'])) $config['earnings'] = 0;
@@ -50,69 +53,87 @@ if(!isset($_SESSION['login'])){
 </div>
 <?php exit; }
 
-// LOGOUT
+// ================= LOGOUT =================
 if(isset($_GET['logout'])){
     session_destroy();
     header("Location: admin.php"); exit;
 }
 
-// ================= ACTIONS =================
-
-// CHANGE PASSWORD (SAFE)
+// ================= CHANGE PASSWORD =================
 if(isset($_POST['new_pass']) && isset($_POST['current_pass'])){
-    $saved = file_get_contents($pass_file);
-
-    if(password_verify($_POST['current_pass'], $saved)){
+    if(password_verify($_POST['current_pass'], $saved_pass)){
         file_put_contents($pass_file, password_hash($_POST['new_pass'], PASSWORD_DEFAULT));
-        $msg = "✅ Password updated!";
-    } else {
-        $msg = "❌ Wrong current password!";
+        header("Location: admin.php"); exit;
     }
 }
 
-// UPLOAD QR
+// ================= UPLOAD QR =================
 if(isset($_FILES['qr'])){
     move_uploaded_file($_FILES['qr']['tmp_name'], "qr.jpg");
     $config['qr'] = "qr.jpg";
     file_put_contents($config_file, json_encode($config, JSON_PRETTY_PRINT));
+    header("Location: admin.php"); exit;
 }
 
-// ADD RATE
+// ================= ADD RATE =================
 if(isset($_POST['new_amount']) && isset($_POST['new_label'])){
-    $config['rates'][] = [
-        "amount"=>intval($_POST['new_amount']),
-        "label"=>$_POST['new_label']
-    ];
-    file_put_contents($config_file, json_encode($config, JSON_PRETTY_PRINT));
+    $amount = intval($_POST['new_amount']);
+    $label  = trim($_POST['new_label']);
+
+    if($amount && $label){
+        foreach($config['rates'] as $r){
+            if($r['amount'] == $amount){
+                header("Location: admin.php"); exit;
+            }
+        }
+
+        $config['rates'][] = [
+            "amount"=>$amount,
+            "label"=>$label
+        ];
+
+        file_put_contents($config_file, json_encode($config, JSON_PRETTY_PRINT));
+    }
+
+    header("Location: admin.php"); exit;
 }
 
-// DELETE RATE
+// ================= DELETE RATE =================
 if(isset($_GET['delrate'])){
     $del = intval($_GET['delrate']);
     $config['rates'] = array_values(array_filter($config['rates'], fn($r)=>$r['amount']!=$del));
     file_put_contents($config_file, json_encode($config, JSON_PRETTY_PRINT));
+    header("Location: admin.php"); exit;
 }
 
-// ADD VOUCHERS
+// ================= UPLOAD VOUCHERS =================
 if(isset($_POST['amount']) && isset($_POST['codes'])){
-    $a = $_POST['amount'];
-    if(!isset($data[$a])) $data[$a]=[];
+    $a = intval($_POST['amount']);
+
+    if(!isset($data[$a])) $data[$a] = [];
 
     foreach(explode("\n", $_POST['codes']) as $c){
-        $c=trim($c);
-        if($c) $data[$a][]=$c;
+        $c = trim($c);
+        if(!$c) continue;
+
+        if(!in_array($c, $data[$a])){
+            $data[$a][] = $c;
+        }
     }
 
     file_put_contents($voucher_file, json_encode($data, JSON_PRETTY_PRINT));
+
+    header("Location: admin.php?success=1"); exit;
 }
 
-// DELETE ALL
+// ================= DELETE ALL =================
 if(isset($_GET['delete_all'])){
     $data[$_GET['delete_all']] = [];
     file_put_contents($voucher_file, json_encode($data, JSON_PRETTY_PRINT));
+    header("Location: admin.php"); exit;
 }
 
-// DELETE ONE
+// ================= DELETE ONE =================
 if(isset($_GET['delete_one'])){
     $a=$_GET['amount'];
     $code=$_GET['delete_one'];
@@ -121,11 +142,14 @@ if(isset($_GET['delete_one'])){
         $data[$a]=array_values(array_filter($data[$a], fn($v)=>$v!==$code));
         file_put_contents($voucher_file, json_encode($data, JSON_PRETTY_PRINT));
     }
+
+    header("Location: admin.php"); exit;
 }
 
-// CLEAR LOGS
+// ================= CLEAR LOGS =================
 if(isset($_POST['clear_logs'])){
     file_put_contents($logs_file, json_encode([], JSON_PRETTY_PRINT));
+    header("Location: admin.php"); exit;
 }
 ?>
 
@@ -150,21 +174,9 @@ input,textarea,select{width:100%;padding:10px;margin-top:5px;border-radius:8px;b
 <h2>🔥 ADMIN PANEL</h2>
 <a href="?logout=1" style="color:red;">Logout</a>
 
-<!-- CHANGE PASSWORD -->
-<div class="card">
-<h3>🔑 Change Password</h3>
-
-<form method="post">
-<input type="password" name="current_pass" placeholder="Current Password" required>
-<input type="password" name="new_pass" placeholder="New Password" required>
-<button>Update Password</button>
-</form>
-
-<?php if(isset($msg)): ?>
-<p><?= $msg ?></p>
+<?php if(isset($_GET['success'])): ?>
+<p style="color:green;">✅ Upload successful</p>
 <?php endif; ?>
-
-</div>
 
 <!-- EARNINGS -->
 <div class="card">
@@ -172,35 +184,21 @@ input,textarea,select{width:100%;padding:10px;margin-top:5px;border-radius:8px;b
 <h2>₱<?= $config['earnings'] ?></h2>
 </div>
 
-<!-- QR -->
-<div class="card">
-<h3>📷 QR</h3>
-<img src="<?= $config['qr'] ?>" width="120"><br><br>
-<form method="post" enctype="multipart/form-data">
-<input type="file" name="qr">
-<button>Upload</button>
-</form>
-</div>
-
 <!-- RATES -->
 <div class="card">
 <h3>💸 Rates</h3>
-
 <?php foreach($config['rates'] as $r): ?>
-<p>
-₱<?= $r['amount'] ?> - <?= $r['label'] ?>
-<a href="?delrate=<?= $r['amount'] ?>">❌</a>
-</p>
+<p>₱<?= $r['amount'] ?> - <?= $r['label'] ?> <a href="?delrate=<?= $r['amount'] ?>">❌</a></p>
 <?php endforeach; ?>
 
 <form method="post">
 <input name="new_amount" placeholder="Amount">
-<input name="new_label" placeholder="Label (ex: 4 Hours)">
+<input name="new_label" placeholder="Label">
 <button>Add Rate</button>
 </form>
 </div>
 
-<!-- ADD VOUCHERS -->
+<!-- UPLOAD VOUCHERS -->
 <div class="card">
 <h3>📋 Upload Vouchers</h3>
 <form method="post">
@@ -219,29 +217,8 @@ input,textarea,select{width:100%;padding:10px;margin-top:5px;border-radius:8px;b
 <div class="card">
 <h3>📊 Remaining</h3>
 <?php foreach($data as $a=>$list): ?>
-<p>
-₱<?= $a ?> = <?= count($list) ?>
-<a href="?delete_all=<?= $a ?>">❌</a>
-</p>
+<p>₱<?= $a ?> = <?= count($list) ?> <a href="?delete_all=<?= $a ?>">❌</a></p>
 <?php endforeach; ?>
-</div>
-
-<!-- LIST -->
-<div class="card">
-<h3>📋 Voucher List</h3>
-
-<?php foreach($data as $a=>$list): ?>
-<h4>₱<?= $a ?></h4>
-<div class="scroll">
-<?php foreach($list as $v): ?>
-<div class="voucher">
-<span><?= $v ?></span>
-<a href="?delete_one=<?= $v ?>&amount=<?= $a ?>">❌</a>
-</div>
-<?php endforeach; ?>
-</div>
-<?php endforeach; ?>
-
 </div>
 
 <!-- LOGS -->
@@ -254,11 +231,11 @@ input,textarea,select{width:100%;padding:10px;margin-top:5px;border-radius:8px;b
 <div class="scroll">
 <?php foreach(array_reverse($logs) as $log): ?>
 <div style="border-bottom:1px solid #eee;padding:8px;">
-<b><?= $log['voucher'] ?? 'N/A' ?></b><br>
-₱<?= $log['amount'] ?? '0' ?> | <?= $log['time'] ?? '-' ?><br>
-IP: <?= $log['ip'] ?? 'N/A' ?><br>
-MAC: <?= $log['mac'] ?? 'N/A' ?><br>
-Token: <?= $log['token'] ?? 'N/A' ?>
+<b><?= htmlspecialchars($log['voucher'] ?? 'N/A') ?></b><br>
+₱<?= intval($log['amount'] ?? 0) ?> | <?= htmlspecialchars($log['time'] ?? '-') ?><br>
+IP: <?= htmlspecialchars($log['ip'] ?? 'N/A') ?><br>
+MAC: <?= htmlspecialchars($log['mac'] ?? 'N/A') ?><br>
+Token: <?= htmlspecialchars($log['token'] ?? 'N/A') ?>
 </div>
 <?php endforeach; ?>
 </div>
@@ -268,7 +245,6 @@ Token: <?= $log['token'] ?? 'N/A' ?>
 </form>
 
 <?php endif; ?>
-
 </div>
 
 </body>
