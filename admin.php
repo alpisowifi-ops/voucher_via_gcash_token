@@ -74,20 +74,60 @@ if(isset($_POST['new_pass']) && isset($_POST['current_pass'])){
     }
 }
 
-// ================= UPLOAD QR =================
-if(isset($_FILES['qr'])){
-    move_uploaded_file($_FILES['qr']['tmp_name'], "qr.jpg");
-    $config['qr'] = "qr.jpg";
-    save_json($config_file, $config);
-}
-
 // ================= ADD RATE =================
 if(isset($_POST['new_amount']) && isset($_POST['new_label'])){
-    $config['rates'][] = [
-        "amount"=>intval($_POST['new_amount']),
-        "label"=>$_POST['new_label']
-    ];
-    save_json($config_file, $config);
+    $amount = intval($_POST['new_amount']);
+    $label  = trim($_POST['new_label']);
+
+    if($amount > 0 && $label != ""){
+        $exists = false;
+        foreach($config['rates'] as $r){
+            if($r['amount'] == $amount){
+                $exists = true;
+            }
+        }
+
+        if(!$exists){
+            $config['rates'][] = [
+                "amount"=>$amount,
+                "label"=>$label
+            ];
+            save_json($config_file, $config);
+            header("Location: admin.php");
+            exit;
+        } else {
+            $msg = "❌ Amount already exists!";
+        }
+    } else {
+        $msg = "❌ Fill all fields!";
+    }
+}
+
+// ================= EDIT RATE =================
+if(isset($_POST['update_rate'])){
+    $old = intval($_POST['old_amount']);
+    $new = intval($_POST['edit_amount']);
+    $label = trim($_POST['edit_label']);
+
+    if($new > 0 && $label != ""){
+        foreach($config['rates'] as &$r){
+            if($r['amount'] == $old){
+                $r['amount'] = $new;
+                $r['label']  = $label;
+            }
+        }
+
+        if($old != $new && isset($data[$old])){
+            if(!isset($data[$new])) $data[$new] = [];
+            $data[$new] = array_merge($data[$new], $data[$old]);
+            unset($data[$old]);
+            save_json($voucher_file, $data);
+        }
+
+        save_json($config_file, $config);
+        header("Location: admin.php");
+        exit;
+    }
 }
 
 // DELETE RATE
@@ -97,14 +137,12 @@ if(isset($_GET['delrate'])){
     save_json($config_file, $config);
 }
 
-// ================= ADD VOUCHERS (FIXED) =================
+// ================= ADD VOUCHERS =================
 if(isset($_POST['amount']) && isset($_POST['codes'])){
     $a = intval($_POST['amount']);
     if(!isset($data[$a])) $data[$a]=[];
 
-    $lines = explode("\n", $_POST['codes']);
-
-    foreach($lines as $c){
+    foreach(explode("\n", $_POST['codes']) as $c){
         $c = trim($c);
         if($c && !in_array($c, $data[$a])){
             $data[$a][] = $c;
@@ -112,8 +150,6 @@ if(isset($_POST['amount']) && isset($_POST['codes'])){
     }
 
     save_json($voucher_file, $data);
-
-    // 🔥 FIX: reload page para iwas duplicate submit
     header("Location: admin.php");
     exit;
 }
@@ -138,6 +174,16 @@ if(isset($_GET['delete_one'])){
 // CLEAR LOGS
 if(isset($_POST['clear_logs'])){
     save_json($logs_file, []);
+}
+
+// ================= EDIT UI =================
+$editRate = null;
+if(isset($_GET['editrate'])){
+    foreach($config['rates'] as $r){
+        if($r['amount'] == $_GET['editrate']){
+            $editRate = $r;
+        }
+    }
 }
 ?>
 
@@ -173,36 +219,37 @@ input,textarea,select{width:100%;padding:10px;margin-top:5px;border-radius:8px;b
 <?php if(isset($msg)): ?><p><?= $msg ?></p><?php endif; ?>
 </div>
 
-<!-- EARNINGS -->
-<div class="card">
-<h3>💰 Earnings</h3>
-<h2>₱<?= $config['earnings'] ?></h2>
-</div>
-
-<!-- QR -->
-<div class="card">
-<h3>📷 QR</h3>
-<img src="<?= $config['qr'] ?>" width="120"><br><br>
-<form method="post" enctype="multipart/form-data">
-<input type="file" name="qr">
-<button>Upload</button>
-</form>
-</div>
-
 <!-- RATES -->
 <div class="card">
 <h3>💸 Rates</h3>
+
 <?php foreach($config['rates'] as $r): ?>
-<p>₱<?= $r['amount'] ?> - <?= $r['label'] ?>
-<a href="?delrate=<?= $r['amount'] ?>">❌</a></p>
+<p>
+₱<?= $r['amount'] ?> - <?= $r['label'] ?>
+<a href="?editrate=<?= $r['amount'] ?>">✏️</a>
+<a href="?delrate=<?= $r['amount'] ?>">❌</a>
+</p>
 <?php endforeach; ?>
 
 <form method="post">
-<input name="new_amount" placeholder="Amount">
-<input name="new_label" placeholder="Label">
+<input name="new_amount" type="number" placeholder="Amount" required>
+<input name="new_label" placeholder="Label" required>
 <button>Add Rate</button>
 </form>
 </div>
+
+<!-- EDIT RATE -->
+<?php if($editRate): ?>
+<div class="card">
+<h3>✏️ Edit Rate</h3>
+<form method="post">
+<input type="hidden" name="old_amount" value="<?= $editRate['amount'] ?>">
+<input name="edit_amount" type="number" value="<?= $editRate['amount'] ?>" required>
+<input name="edit_label" value="<?= $editRate['label'] ?>" required>
+<button name="update_rate">Update Rate</button>
+</form>
+</div>
+<?php endif; ?>
 
 <!-- ADD VOUCHERS -->
 <div class="card">
@@ -219,25 +266,11 @@ input,textarea,select{width:100%;padding:10px;margin-top:5px;border-radius:8px;b
 </form>
 </div>
 
-<!-- REMAINING -->
-<div class="card">
-<h3>📊 Remaining</h3>
-<?php foreach($data as $a=>$list): ?>
-<p>₱<?= $a ?> = <?= count($list) ?>
-<a href="?delete_all=<?= $a ?>">❌</a></p>
-<?php endforeach; ?>
-</div>
-
-<!-- LIST (FIXED DISPLAY) -->
+<!-- LIST -->
 <div class="card">
 <h3>📋 Voucher List</h3>
-
 <?php foreach($data as $a=>$list): ?>
 <h4>₱<?= $a ?></h4>
-
-<?php if(empty($list)): ?>
-<p>No vouchers</p>
-<?php else: ?>
 <div class="scroll">
 <?php foreach($list as $v): ?>
 <div class="voucher">
@@ -246,15 +279,12 @@ input,textarea,select{width:100%;padding:10px;margin-top:5px;border-radius:8px;b
 </div>
 <?php endforeach; ?>
 </div>
-<?php endif; ?>
-
 <?php endforeach; ?>
 </div>
 
 <!-- LOGS -->
 <div class="card">
 <h3>📊 User Logs</h3>
-
 <?php if(empty($logs)): ?>
 <p>No logs yet</p>
 <?php else: ?>
@@ -273,7 +303,6 @@ Token: <?= $log['token'] ?? 'N/A' ?>
 <form method="post">
 <button name="clear_logs" style="background:red;">Clear Logs</button>
 </form>
-
 <?php endif; ?>
 </div>
 
