@@ -6,7 +6,7 @@ $config_file = "config.json";
 $voucher_file = "vouchers.json";
 $logs_file = "logs.json";
 
-// ================= SAFE JSON =================
+// ================= JSON =================
 function load_json($file){
     if(!file_exists($file)){
         file_put_contents($file, json_encode([], JSON_PRETTY_PRINT));
@@ -33,9 +33,9 @@ $config = load_json($config_file);
 $data   = load_json($voucher_file);
 $logs   = load_json($logs_file);
 
-if(!isset($config['qr'])) $config['qr'] = "qr.jpg";
-if(!isset($config['rates'])) $config['rates'] = [];
-if(!isset($config['earnings'])) $config['earnings'] = 0;
+$config['qr'] = $config['qr'] ?? "qr.jpg";
+$config['rates'] = $config['rates'] ?? [];
+$config['earnings'] = $config['earnings'] ?? 0;
 
 // ================= LOGIN =================
 $saved_pass = file_get_contents($pass_file);
@@ -64,8 +64,8 @@ if(isset($_GET['logout'])){
     header("Location: admin.php"); exit;
 }
 
-// ================= CHANGE PASSWORD =================
-if(isset($_POST['new_pass']) && isset($_POST['current_pass'])){
+// ================= PASSWORD =================
+if(isset($_POST['new_pass'])){
     if(password_verify($_POST['current_pass'], $saved_pass)){
         file_put_contents($pass_file, password_hash($_POST['new_pass'], PASSWORD_DEFAULT));
         $msg = "✅ Password updated!";
@@ -74,34 +74,35 @@ if(isset($_POST['new_pass']) && isset($_POST['current_pass'])){
     }
 }
 
+// ================= QR =================
+if(isset($_FILES['qr'])){
+    if($_FILES['qr']['tmp_name']){
+        move_uploaded_file($_FILES['qr']['tmp_name'], "qr.jpg");
+        $config['qr'] = "qr.jpg";
+        save_json($config_file, $config);
+        header("Location: admin.php"); exit;
+    }
+}
+
 // ================= ADD RATE =================
-if(isset($_POST['new_amount']) && isset($_POST['new_label'])){
+if(isset($_POST['new_amount'])){
     $amount = intval($_POST['new_amount']);
     $label  = trim($_POST['new_label']);
 
-    if($amount > 0 && $label != ""){
-        $exists = false;
+    if($amount && $label){
         foreach($config['rates'] as $r){
             if($r['amount'] == $amount){
-                $exists = true;
+                $msg = "❌ Already exists";
+                goto skip;
             }
         }
 
-        if(!$exists){
-            $config['rates'][] = [
-                "amount"=>$amount,
-                "label"=>$label
-            ];
-            save_json($config_file, $config);
-            header("Location: admin.php");
-            exit;
-        } else {
-            $msg = "❌ Amount already exists!";
-        }
-    } else {
-        $msg = "❌ Fill all fields!";
+        $config['rates'][] = ["amount"=>$amount,"label"=>$label];
+        save_json($config_file, $config);
+        header("Location: admin.php"); exit;
     }
 }
+skip:;
 
 // ================= EDIT RATE =================
 if(isset($_POST['update_rate'])){
@@ -109,25 +110,22 @@ if(isset($_POST['update_rate'])){
     $new = intval($_POST['edit_amount']);
     $label = trim($_POST['edit_label']);
 
-    if($new > 0 && $label != ""){
-        foreach($config['rates'] as &$r){
-            if($r['amount'] == $old){
-                $r['amount'] = $new;
-                $r['label']  = $label;
-            }
+    foreach($config['rates'] as &$r){
+        if($r['amount'] == $old){
+            $r['amount'] = $new;
+            $r['label'] = $label;
         }
-
-        if($old != $new && isset($data[$old])){
-            if(!isset($data[$new])) $data[$new] = [];
-            $data[$new] = array_merge($data[$new], $data[$old]);
-            unset($data[$old]);
-            save_json($voucher_file, $data);
-        }
-
-        save_json($config_file, $config);
-        header("Location: admin.php");
-        exit;
     }
+
+    if($old != $new && isset($data[$old])){
+        if(!isset($data[$new])) $data[$new] = [];
+        $data[$new] = array_merge($data[$new], $data[$old]);
+        unset($data[$old]);
+        save_json($voucher_file, $data);
+    }
+
+    save_json($config_file, $config);
+    header("Location: admin.php"); exit;
 }
 
 // DELETE RATE
@@ -135,10 +133,11 @@ if(isset($_GET['delrate'])){
     $del = intval($_GET['delrate']);
     $config['rates'] = array_values(array_filter($config['rates'], fn($r)=>$r['amount']!=$del));
     save_json($config_file, $config);
+    header("Location: admin.php"); exit;
 }
 
 // ================= ADD VOUCHERS =================
-if(isset($_POST['amount']) && isset($_POST['codes'])){
+if(isset($_POST['codes'])){
     $a = intval($_POST['amount']);
     if(!isset($data[$a])) $data[$a]=[];
 
@@ -150,14 +149,7 @@ if(isset($_POST['amount']) && isset($_POST['codes'])){
     }
 
     save_json($voucher_file, $data);
-    header("Location: admin.php");
-    exit;
-}
-
-// DELETE ALL
-if(isset($_GET['delete_all'])){
-    $data[$_GET['delete_all']] = [];
-    save_json($voucher_file, $data);
+    header("Location: admin.php"); exit;
 }
 
 // DELETE ONE
@@ -169,11 +161,24 @@ if(isset($_GET['delete_one'])){
         $data[$a]=array_values(array_filter($data[$a], fn($v)=>$v!==$code));
         save_json($voucher_file, $data);
     }
+
+    header("Location: admin.php"); exit;
+}
+
+// DELETE ALL
+if(isset($_GET['delete_all'])){
+    $a = intval($_GET['delete_all']);
+    if(isset($data[$a])){
+        $data[$a] = [];
+        save_json($voucher_file, $data);
+    }
+    header("Location: admin.php"); exit;
 }
 
 // CLEAR LOGS
 if(isset($_POST['clear_logs'])){
     save_json($logs_file, []);
+    header("Location: admin.php"); exit;
 }
 
 // ================= EDIT UI =================
@@ -194,11 +199,10 @@ if(isset($_GET['editrate'])){
 <title>Admin Panel</title>
 
 <style>
-body{font-family:Arial;background:#0f2027;color:white;margin:0;padding:15px;}
+body{font-family:Arial;background:#0f2027;color:white;padding:15px;}
 .card{background:white;color:black;padding:15px;margin-bottom:15px;border-radius:12px;}
 button{padding:10px;border:none;border-radius:8px;background:#2196F3;color:white;}
 input,textarea,select{width:100%;padding:10px;margin-top:5px;border-radius:8px;border:1px solid #ccc;}
-.voucher{display:flex;justify-content:space-between;border-bottom:1px solid #eee;padding:5px;}
 .scroll{max-height:200px;overflow:auto;}
 </style>
 </head>
@@ -208,21 +212,36 @@ input,textarea,select{width:100%;padding:10px;margin-top:5px;border-radius:8px;b
 <h2>🔥 ADMIN PANEL</h2>
 <a href="?logout=1" style="color:red;">Logout</a>
 
-<!-- CHANGE PASSWORD -->
+<!-- PASSWORD -->
 <div class="card">
 <h3>🔑 Change Password</h3>
 <form method="post">
 <input type="password" name="current_pass" placeholder="Current Password" required>
 <input type="password" name="new_pass" placeholder="New Password" required>
-<button>Update Password</button>
+<button>Update</button>
 </form>
-<?php if(isset($msg)): ?><p><?= $msg ?></p><?php endif; ?>
+<p><?= $msg ?? '' ?></p>
+</div>
+
+<!-- QR -->
+<div class="card">
+<h3>📷 QR</h3>
+<img src="<?= $config['qr'] ?>" width="150"><br><br>
+<form method="post" enctype="multipart/form-data">
+<input type="file" name="qr">
+<button>Upload QR</button>
+</form>
+</div>
+
+<!-- EARNINGS -->
+<div class="card">
+<h3>💰 Earnings</h3>
+<h2>₱<?= $config['earnings'] ?></h2>
 </div>
 
 <!-- RATES -->
 <div class="card">
 <h3>💸 Rates</h3>
-
 <?php foreach($config['rates'] as $r): ?>
 <p>
 ₱<?= $r['amount'] ?> - <?= $r['label'] ?>
@@ -232,26 +251,26 @@ input,textarea,select{width:100%;padding:10px;margin-top:5px;border-radius:8px;b
 <?php endforeach; ?>
 
 <form method="post">
-<input name="new_amount" type="number" placeholder="Amount" required>
-<input name="new_label" placeholder="Label" required>
+<input name="new_amount" type="number" placeholder="Amount">
+<input name="new_label" placeholder="Label">
 <button>Add Rate</button>
 </form>
 </div>
 
-<!-- EDIT RATE -->
+<!-- EDIT -->
 <?php if($editRate): ?>
 <div class="card">
 <h3>✏️ Edit Rate</h3>
 <form method="post">
 <input type="hidden" name="old_amount" value="<?= $editRate['amount'] ?>">
-<input name="edit_amount" type="number" value="<?= $editRate['amount'] ?>" required>
-<input name="edit_label" value="<?= $editRate['label'] ?>" required>
-<button name="update_rate">Update Rate</button>
+<input name="edit_amount" value="<?= $editRate['amount'] ?>">
+<input name="edit_label" value="<?= $editRate['label'] ?>">
+<button name="update_rate">Update</button>
 </form>
 </div>
 <?php endif; ?>
 
-<!-- ADD VOUCHERS -->
+<!-- VOUCHERS -->
 <div class="card">
 <h3>📋 Upload Vouchers</h3>
 <form method="post">
@@ -260,10 +279,20 @@ input,textarea,select{width:100%;padding:10px;margin-top:5px;border-radius:8px;b
 <option value="<?= $r['amount'] ?>">₱<?= $r['amount'] ?></option>
 <?php endforeach; ?>
 </select>
-
-<textarea name="codes" placeholder="Enter codes, one per line"></textarea>
+<textarea name="codes"></textarea>
 <button>Upload</button>
 </form>
+</div>
+
+<!-- REMAINING -->
+<div class="card">
+<h3>📊 Remaining</h3>
+<?php foreach($data as $a=>$list): ?>
+<p>
+₱<?= $a ?> = <?= count($list) ?>
+<a href="?delete_all=<?= $a ?>" style="color:red;">❌</a>
+</p>
+<?php endforeach; ?>
 </div>
 
 <!-- LIST -->
@@ -273,10 +302,8 @@ input,textarea,select{width:100%;padding:10px;margin-top:5px;border-radius:8px;b
 <h4>₱<?= $a ?></h4>
 <div class="scroll">
 <?php foreach($list as $v): ?>
-<div class="voucher">
-<span><?= htmlspecialchars($v) ?></span>
-<a href="?delete_one=<?= urlencode($v) ?>&amount=<?= $a ?>">❌</a>
-</div>
+<p><?= htmlspecialchars($v) ?>
+<a href="?delete_one=<?= urlencode($v) ?>&amount=<?= $a ?>">❌</a></p>
 <?php endforeach; ?>
 </div>
 <?php endforeach; ?>
@@ -284,26 +311,13 @@ input,textarea,select{width:100%;padding:10px;margin-top:5px;border-radius:8px;b
 
 <!-- LOGS -->
 <div class="card">
-<h3>📊 User Logs</h3>
-<?php if(empty($logs)): ?>
-<p>No logs yet</p>
-<?php else: ?>
-<div class="scroll">
-<?php foreach(array_reverse($logs) as $log): ?>
-<div style="border-bottom:1px solid #eee;padding:8px;">
-<b><?= $log['voucher'] ?? 'N/A' ?></b><br>
-₱<?= $log['amount'] ?? '0' ?> | <?= $log['time'] ?? '-' ?><br>
-IP: <?= $log['ip'] ?? 'N/A' ?><br>
-MAC: <?= $log['mac'] ?? 'N/A' ?><br>
-Token: <?= $log['token'] ?? 'N/A' ?>
-</div>
+<h3>📊 Logs</h3>
+<?php foreach(array_reverse($logs) as $l): ?>
+<p><?= $l['voucher'] ?? '' ?> | ₱<?= $l['amount'] ?? '' ?><br><?= $l['time'] ?? '' ?></p>
 <?php endforeach; ?>
-</div>
-
 <form method="post">
-<button name="clear_logs" style="background:red;">Clear Logs</button>
+<button name="clear_logs">Clear Logs</button>
 </form>
-<?php endif; ?>
 </div>
 
 </body>
